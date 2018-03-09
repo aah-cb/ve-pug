@@ -1,6 +1,6 @@
 # Pug View Engine (Formerly aka Jade)
 
-** This library is an integration piece for aah framework **
+**This library is an integration piece for aah framework**
 
 Jade Template Engine is implemented by [@Joker](https://github.com/Joker) and repository is here https://github.com/Joker/jade.
 

@@ -5,4 +5,4 @@
 package pug
 
 // Version is Pug view engine version number.
-const Version = "1.0-edge"
+const Version = "1.0"

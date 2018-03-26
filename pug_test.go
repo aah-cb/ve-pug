@@ -59,7 +59,7 @@ func TestPugViewUserPages(t *testing.T) {
 		"PageName":  "user home page",
 	}
 
-	e.caseSensitive = true
+	e.CaseSensitive = true
 
 	tmpl, err := e.Get("master.pug", "pages/user", "index.pug")
 	assert.Nil(t, err)
@@ -156,7 +156,7 @@ func TestPugViewErrors(t *testing.T) {
 	assert.True(t, strings.HasPrefix(err.Error(), "pugviewengine: pages base dir is not exists:"))
 
 	// handle errors methods
-	err = handleParseError([]error{errors.New("error 1"), errors.New("error 2")})
+	err = e.ParseErrors([]error{errors.New("error 1"), errors.New("error 2")})
 	assert.NotNil(t, err)
 	assert.Equal(t, "pugviewengine: error processing templates, please check the log", err.Error())
 }
@@ -175,9 +175,9 @@ func loadPugViewEngine(t *testing.T, cfg *config.Config, dir string) *PugViewEng
 	err := e.Init(cfg, viewsDir)
 	assert.FailNowOnError(t, err, "")
 
-	assert.Equal(t, viewsDir, e.baseDir)
-	assert.NotNil(t, e.cfg)
-	assert.NotNil(t, e.layouts)
+	assert.Equal(t, viewsDir, e.BaseDir)
+	assert.NotNil(t, e.AppConfig)
+	assert.NotNil(t, e.Templates)
 
 	return e
 }

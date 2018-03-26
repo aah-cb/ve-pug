@@ -6,8 +6,6 @@ package pug
 
 import (
 	"bytes"
-	"errors"
-	"fmt"
 	"html/template"
 	"io/ioutil"
 	"path/filepath"
@@ -35,42 +33,19 @@ var (
 
 // PugViewEngine formerly know as Jade.
 type PugViewEngine struct {
-	cfg             *config.Config
-	baseDir         string
-	layouts         map[string]*view.Templates
-	viewFileExt     string
-	caseSensitive   bool
-	isLayoutEnabled bool
-	leftDelim       string
-	rightDelim      string
-	antiCSRFField   *view.AntiCSRFField
+	*view.EngineBase
 }
 
 // Init method initialize a pug (jade) template engine with given aah application config
 // and application views base path.
 func (e *PugViewEngine) Init(appCfg *config.Config, baseDir string) error {
-	// check base directory
-	if !ess.IsFileExists(baseDir) {
-		return fmt.Errorf("pugviewengine: views base dir is not exists: %s", baseDir)
+	if e.EngineBase == nil {
+		e.EngineBase = &view.EngineBase{}
 	}
 
-	// initialize
-	e.baseDir = baseDir
-	e.cfg = appCfg
-	e.viewFileExt = e.cfg.StringDefault("view.ext", ".pug")
-	e.caseSensitive = e.cfg.BoolDefault("view.case_sensitive", false)
-	e.isLayoutEnabled = e.cfg.BoolDefault("view.default_layout", true)
-
-	delimiter := strings.Split(e.cfg.StringDefault("view.delimiters", view.DefaultDelimiter), ".")
-	if len(delimiter) != 2 || ess.IsStrEmpty(delimiter[0]) || ess.IsStrEmpty(delimiter[1]) {
-		return fmt.Errorf("pugviewengine: config 'view.delimiters' value is invalid")
+	if err := e.EngineBase.Init(appCfg, baseDir, "pug", ".pug"); err != nil {
+		return err
 	}
-	e.leftDelim, e.rightDelim = delimiter[0], delimiter[1]
-
-	e.layouts = make(map[string]*view.Templates)
-
-	// Anti CSRF, repurpose it from aahframework.org/view.v0
-	e.antiCSRFField = view.NewAntiCSRFField("pug", e.leftDelim, e.rightDelim)
 
 	// Add template funcs
 	view.AddTemplateFunc(template.FuncMap{
@@ -84,7 +59,7 @@ func (e *PugViewEngine) Init(appCfg *config.Config, baseDir string) error {
 	}
 
 	// collect all layouts
-	layouts, err := e.findLayouts()
+	layouts, err := e.LayoutFiles()
 	if err != nil {
 		return err
 	}
@@ -95,13 +70,13 @@ func (e *PugViewEngine) Init(appCfg *config.Config, baseDir string) error {
 	}
 
 	// load no layout pages templates, if enabled
-	if !e.isLayoutEnabled {
+	if !e.IsLayoutEnabled {
 		// since pages directory processed above, no error expected here
 		_ = e.loadNonLayoutTemplates("pages")
 	}
 
 	// load errors templates
-	if ess.IsFileExists(filepath.Join(e.baseDir, "errors")) {
+	if ess.IsFileExists(filepath.Join(e.BaseDir, "errors")) {
 		if err = e.loadNonLayoutTemplates("errors"); err != nil {
 			return err
 		}
@@ -110,54 +85,24 @@ func (e *PugViewEngine) Init(appCfg *config.Config, baseDir string) error {
 	return nil
 }
 
-// Get method returns the template based given name if found, otherwise nil.
-func (e *PugViewEngine) Get(layout, path, tmplName string) (*template.Template, error) {
-	if ess.IsStrEmpty(layout) {
-		layout = noLayout
-	}
-
-	if l, found := e.layouts[layout]; found {
-		key := filepath.Join(path, tmplName)
-		if layout == noLayout {
-			key = noLayout + "-" + key
-		}
-
-		if !e.caseSensitive {
-			key = strings.ToLower(key)
-		}
-
-		if t := l.Lookup(key); t != nil {
-			return t, nil
-		}
-	}
-
-	return nil, view.ErrTemplateNotFound
-}
-
 //‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
 // type PugViewEngine, unexported methods
 //________________________________________
 
 func (e *PugViewEngine) loadCommonTemplates() error {
-	baseDir := filepath.Join(e.baseDir, "common")
-	if !ess.IsFileExists(baseDir) {
-		return fmt.Errorf("pugviewengine: common base dir is not exists: %s", baseDir)
-	}
-
-	puglib.LeftDelim = e.leftDelim
-	puglib.RightDelim = e.rightDelim
-
-	commons, err := ess.FilesPath(baseDir, true)
+	commons, err := e.FilesPath("common")
 	if err != nil {
 		return err
 	}
 
+	puglib.LeftDelim = e.LeftDelim
+	puglib.RightDelim = e.RightDelim
 	commonTemplates = &view.Templates{}
 	bufPool = &sync.Pool{New: func() interface{} { return &bytes.Buffer{} }}
-	prefix := filepath.Dir(e.baseDir)
+	prefix := filepath.Dir(e.BaseDir)
 	for _, file := range commons {
-		if !strings.HasSuffix(file, e.viewFileExt) {
-			log.Errorf("pugviewengine: not a valid template extension[%s]: %s", e.viewFileExt, view.TrimPathPrefix(prefix, file))
+		if !strings.HasSuffix(file, e.FileExt) {
+			log.Errorf("pugviewengine: not a valid template extension[%s]: %s", e.FileExt, view.TrimPathPrefix(prefix, file))
 			continue
 		}
 
@@ -167,9 +112,9 @@ func (e *PugViewEngine) loadCommonTemplates() error {
 		}
 
 		tmplKey := view.StripPathPrefixAt(filepath.ToSlash(file), "views/")
-		tmpl := template.New(tmplKey).Funcs(view.TemplateFuncMap).Delims(e.leftDelim, e.rightDelim)
+		tmpl := e.NewTemplate(tmplKey)
 
-		tstr = e.antiCSRFField.InsertOnString(tstr)
+		tstr = e.AntiCSRFField.InsertOnString(tstr)
 		if tmpl, err = tmpl.Parse(tstr); err != nil {
 			return err
 		}
@@ -182,39 +127,22 @@ func (e *PugViewEngine) loadCommonTemplates() error {
 	return nil
 }
 
-func (e *PugViewEngine) findLayouts() ([]string, error) {
-	baseDir := filepath.Join(e.baseDir, "layouts")
-	if !ess.IsFileExists(baseDir) {
-		return nil, fmt.Errorf("pugviewengine: layouts base dir is not exists: %s", baseDir)
-	}
-
-	return filepath.Glob(filepath.Join(baseDir, "*"+e.viewFileExt))
-}
-
 func (e *PugViewEngine) loadLayoutTemplates(layouts []string) error {
-	baseDir := filepath.Join(e.baseDir, "pages")
-	if !ess.IsFileExists(baseDir) {
-		return fmt.Errorf("pugviewengine: pages base dir is not exists: %s", baseDir)
-	}
-
-	dirs, err := ess.DirsPath(baseDir, true)
+	dirs, err := e.DirsPath("pages")
 	if err != nil {
 		return err
 	}
 
-	puglib.LeftDelim = e.leftDelim
-	puglib.RightDelim = e.rightDelim
+	puglib.LeftDelim = e.LeftDelim
+	puglib.RightDelim = e.RightDelim
 
 	// Temp directory
 	tmpDir, _ := ioutil.TempDir("", "pug_layout_pages")
 
-	prefix := filepath.Dir(e.baseDir)
+	prefix := filepath.Dir(e.BaseDir)
 	var errs []error
 	for _, layout := range layouts {
 		layoutKey := strings.ToLower(filepath.Base(layout))
-		if e.layouts[layoutKey] == nil {
-			e.layouts[layoutKey] = &view.Templates{}
-		}
 
 		layoutStr, err := puglib.ParseFile(layout)
 		if err != nil {
@@ -225,7 +153,7 @@ func (e *PugViewEngine) loadLayoutTemplates(layouts []string) error {
 		e.writeFile(lfilePath, layoutStr)
 
 		for _, dir := range dirs {
-			files, err := filepath.Glob(filepath.Join(dir, "*"+e.viewFileExt))
+			files, err := filepath.Glob(filepath.Join(dir, "*"+e.FileExt))
 			if err != nil {
 				errs = append(errs, err)
 				continue
@@ -242,8 +170,8 @@ func (e *PugViewEngine) loadLayoutTemplates(layouts []string) error {
 
 				tfiles := []string{tfilePath, lfilePath}
 				tmplKey := view.StripPathPrefixAt(filepath.ToSlash(file), "views/")
-				tmpl := template.New(tmplKey).Funcs(view.TemplateFuncMap).Delims(e.leftDelim, e.rightDelim)
-				tmplfiles := e.antiCSRFField.InsertOnFiles(tfiles...)
+				tmpl := e.NewTemplate(tmplKey)
+				tmplfiles := e.AntiCSRFField.InsertOnFiles(tfiles...)
 
 				log.Tracef("Parsing files: %s", view.TrimPathPrefix(prefix, []string{file, layout}...))
 				if tmpl, err = tmpl.ParseFiles(tmplfiles...); err != nil {
@@ -251,38 +179,28 @@ func (e *PugViewEngine) loadLayoutTemplates(layouts []string) error {
 					continue
 				}
 
-				if err = e.layouts[layoutKey].Add(tmplKey, tmpl); err != nil {
+				if err = e.AddTemplate(layoutKey, tmplKey, tmpl); err != nil {
 					errs = append(errs, err)
 				}
 			}
 		}
 	}
 
-	return handleParseError(errs)
+	return e.ParseErrors(errs)
 }
 
 func (e *PugViewEngine) loadNonLayoutTemplates(scope string) error {
-	baseDir := filepath.Join(e.baseDir, scope)
-	if !ess.IsFileExists(baseDir) {
-		return fmt.Errorf("pugviewengine: %s base dir is not exists: %s", scope, baseDir)
-	}
-
-	dirs, err := ess.DirsPath(baseDir, true)
+	dirs, err := e.DirsPath(scope)
 	if err != nil {
 		return err
 	}
 
-	puglib.LeftDelim = e.leftDelim
-	puglib.RightDelim = e.rightDelim
-
-	if e.layouts[noLayout] == nil {
-		e.layouts[noLayout] = &view.Templates{}
-	}
-
-	prefix := filepath.Dir(e.baseDir)
+	puglib.LeftDelim = e.LeftDelim
+	puglib.RightDelim = e.RightDelim
+	prefix := filepath.Dir(e.BaseDir)
 	var errs []error
 	for _, dir := range dirs {
-		files, err := filepath.Glob(filepath.Join(dir, "*"+e.viewFileExt))
+		files, err := filepath.Glob(filepath.Join(dir, "*"+e.FileExt))
 		if err != nil {
 			errs = append(errs, err)
 			continue
@@ -295,8 +213,8 @@ func (e *PugViewEngine) loadNonLayoutTemplates(scope string) error {
 			}
 
 			tmplKey := noLayout + "-" + view.StripPathPrefixAt(filepath.ToSlash(file), "views/")
-			tmpl := template.New(tmplKey).Funcs(view.TemplateFuncMap).Delims(e.leftDelim, e.rightDelim)
-			tstr = e.antiCSRFField.InsertOnString(tstr)
+			tmpl := e.NewTemplate(tmplKey)
+			tstr = e.AntiCSRFField.InsertOnString(tstr)
 
 			log.Tracef("Parsing file: %s", view.TrimPathPrefix(prefix, file))
 			if tmpl, err = tmpl.Parse(tstr); err != nil {
@@ -304,30 +222,18 @@ func (e *PugViewEngine) loadNonLayoutTemplates(scope string) error {
 				continue
 			}
 
-			if err = e.layouts[noLayout].Add(tmplKey, tmpl); err != nil {
+			if err = e.AddTemplate(noLayout, tmplKey, tmpl); err != nil {
 				errs = append(errs, err)
 			}
 		}
 	}
 
-	return handleParseError(errs)
+	return e.ParseErrors(errs)
 }
 
 func (e *PugViewEngine) writeFile(file, content string) {
 	_ = ess.MkDirAll(filepath.Dir(file), 0755)
 	_ = ioutil.WriteFile(file, []byte(content), 0755)
-}
-
-func handleParseError(errs []error) error {
-	if len(errs) > 0 {
-		var msg []string
-		for _, e := range errs {
-			msg = append(msg, e.Error())
-		}
-		log.Errorf("View templates parsing error(s):\n    %s", strings.Join(msg, "\n    "))
-		return errors.New("pugviewengine: error processing templates, please check the log")
-	}
-	return nil
 }
 
 func init() {

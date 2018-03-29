@@ -36,8 +36,8 @@ type PugViewEngine struct {
 	*view.EngineBase
 }
 
-// Init method initialize a pug (jade) template engine with given aah application config
-// and application views base path.
+// Init method initializes Pug (jade) view engine with given aah application config
+// and application views base directory.
 func (e *PugViewEngine) Init(appCfg *config.Config, baseDir string) error {
 	if e.EngineBase == nil {
 		e.EngineBase = &view.EngineBase{}
@@ -106,6 +106,7 @@ func (e *PugViewEngine) loadCommonTemplates() error {
 			continue
 		}
 
+		log.Tracef("Parsing file: %s", view.TrimPathPrefix(prefix, file))
 		tstr, err := puglib.ParseFile(file)
 		if err != nil {
 			return err
@@ -146,7 +147,8 @@ func (e *PugViewEngine) loadLayoutTemplates(layouts []string) error {
 
 		layoutStr, err := puglib.ParseFile(layout)
 		if err != nil {
-			return err
+			errs = append(errs, err)
+			continue
 		}
 
 		lfilePath := filepath.Join(tmpDir, view.StripPathPrefixAt(layout, "views"))
@@ -160,9 +162,11 @@ func (e *PugViewEngine) loadLayoutTemplates(layouts []string) error {
 			}
 
 			for _, file := range files {
+				log.Tracef("Parsing files: %s", view.TrimPathPrefix(prefix, []string{file, layout}...))
 				tstr, err := puglib.ParseFile(file)
 				if err != nil {
-					return err
+					errs = append(errs, err)
+					continue
 				}
 
 				tfilePath := filepath.Join(tmpDir, "views", view.StripPathPrefixAt(file, "views"))
@@ -173,7 +177,6 @@ func (e *PugViewEngine) loadLayoutTemplates(layouts []string) error {
 				tmpl := e.NewTemplate(tmplKey)
 				tmplfiles := e.AntiCSRFField.InsertOnFiles(tfiles...)
 
-				log.Tracef("Parsing files: %s", view.TrimPathPrefix(prefix, []string{file, layout}...))
 				if tmpl, err = tmpl.ParseFiles(tmplfiles...); err != nil {
 					errs = append(errs, err)
 					continue
@@ -209,7 +212,8 @@ func (e *PugViewEngine) loadNonLayoutTemplates(scope string) error {
 		for _, file := range files {
 			tstr, err := puglib.ParseFile(file)
 			if err != nil {
-				return err
+				errs = append(errs, err)
+				continue
 			}
 
 			tmplKey := noLayout + "-" + view.StripPathPrefixAt(filepath.ToSlash(file), "views/")

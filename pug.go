@@ -17,7 +17,7 @@ import (
 	"aahframework.org/log.v0"
 	"aahframework.org/view.v0"
 
-	puglib "github.com/Joker/jade"
+	puglib "github.com/go-aah/jade"
 )
 
 const noLayout = "nolayout"
